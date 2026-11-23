@@ -13,32 +13,15 @@ from geo_tracker import calculate_steps_and_calories, haversine_distance
 logger = logging.getLogger(__name__)
 router = Router()
 
-
 MONTHS_RU = [
-    "",
-    "января",
-    "февраля",
-    "марта",
-    "апреля",
-    "мая",
-    "июня",
-    "июля",
-    "августа",
-    "сентября",
-    "октября",
-    "ноября",
-    "декабря",
+    "", "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
 ]
 
-
 def format_date_ru(dt: datetime) -> str:
-    """Форматирует дату на русском языке: '23 ноября 2026'."""
     return f"{dt.day} {MONTHS_RU[dt.month]} {dt.year}"
 
-
 def setup_handlers(db: Database) -> Router:
-    """Регистрирует минималистичные хэндлеры без лишних кнопок."""
-
     @router.message(CommandStart())
     async def cmd_start(message: Message) -> None:
         user_id = message.from_user.id
@@ -54,7 +37,7 @@ def setup_handlers(db: Database) -> Router:
             f"• <b>07:00, 16:00, 20:00, 22:00</b> — ОБЩЕЕ: белки, правильное питание и обязательно кола зеро\n\n"
             f"🚶 <b>Подсчет шагов:</b>\n"
             f"Включите трансляцию геопозиции (скрепка 📎 -> Геопозиция -> Транслировать).\n"
-            f"Бот будет считать шаги молча в фоне. Чтобы узнать результат, просто напишите: <b>сколько</b>."
+            f"Бот считает молча в фоне. Напишите <b>сколько</b>, чтобы узнать результат!"
         )
         await message.answer(welcome_text, reply_markup=ReplyKeyboardRemove(), parse_mode="HTML")
 
@@ -88,7 +71,6 @@ def setup_handlers(db: Database) -> Router:
         )
         await message.answer(text, parse_mode="HTML")
 
-    # --- Обработка первой входящей геопозиции ---
     @router.message(F.location)
     async def handle_initial_location(message: Message) -> None:
         user_id = message.from_user.id
@@ -107,13 +89,13 @@ def setup_handlers(db: Database) -> Router:
 
         resp = (
             "📍 <b>Геопозиция принята. Шагомер включен!</b>\n\n"
-            "Бот считает пройденный путь в фоновом режиме без спама.\n"
-            "В любой момент напишите <code>сколько</code>, чтобы узнать текущие шаги и калории.\n"
-            "Чтобы завершить прогулку, напишите <code>стоп</code>."
+            "Бот считает путь в фоне без спама.\n"
+            "Напишите <code>сколько</code>, чтобы узнать текущие шаги и калории.\n"
+            "Напишите <code>стоп</code>, чтобы завершить прогулку."
         )
         await message.answer(resp, parse_mode="HTML")
 
-    # --- Поток обновлений Live Location (БЕЗ СПАМА, только тихий подсчет) ---
+    # ТИХИЙ ПОДСЧЕТ БЕЗ СПАМА
     @router.edited_message(F.location)
     async def handle_live_location_update(message: Message) -> None:
         user_id = message.from_user.id
@@ -143,7 +125,6 @@ def setup_handlers(db: Database) -> Router:
         dt = max(now_ts - last_ts, 1.0)
         speed_mps = dist_m / dt
 
-        # Фильтр шума (< 8м) и скорости (> 20 км/ч = машина/автобус)
         if dist_m >= 8.0 and speed_mps <= 5.5:
             steps, _ = calculate_steps_and_calories(dist_m)
             await db.update_activity_session(
@@ -154,11 +135,10 @@ def setup_handlers(db: Database) -> Router:
                 lon=new_lon,
                 timestamp=now_ts,
             )
-            # Автоматическую отправку сообщений убрали — теперь бот считает молча!
 
-    # --- Проверка шагов по слову "СКОЛЬКО" или "шаги" ---
+    # ОТВЕТ НА СЛОВО "СКОЛЬКО"
     @router.message(Command("steps"))
-    @router.message(F.text.lower().in_(["сколько", "скок", "шаги", "шаг", "прогресс", "км", "сколько прошел", "сколько прошли"]))
+    @router.message(F.text.lower().in_(["сколько", "скок", "шаги", "шаг", "прогресс", "км"]))
     async def cmd_steps(message: Message) -> None:
         user_id = message.from_user.id
         user_tz = await db.get_user_timezone(user_id, settings.default_timezone)
@@ -172,21 +152,18 @@ def setup_handlers(db: Database) -> Router:
         daily = await db.get_daily_activity(user_id, today_str)
         active_sess = await db.get_active_session(user_id)
 
-        # Считаем текущую сессию
         cur_dist_m = active_sess["total_distance_meters"] if active_sess else 0.0
         cur_steps = active_sess["total_steps"] if active_sess else 0
         _, cur_kcal = calculate_steps_and_calories(cur_dist_m)
         cur_dist_km = round(cur_dist_m / 1000.0, 2)
 
-        # Считаем всего за день
         total_steps = daily["total_steps"] + cur_steps
         total_km = round(daily["total_distance_km"] + cur_dist_km, 2)
         total_kcal = round(daily["total_calories"] + cur_kcal, 1)
 
-        # Лаконичный ответ
         response_msg = (
-            f"🚶‍♂️ <b>Пройдено сейчас</b>: {cur_dist_km} км | ~<b>{cur_steps:,}</b> шагов | ~<b>{cur_kcal}</b> ккал\n\n"
-            f"📊 <b>Всего за сегодня ({today_display})</b>:\n"
+            f"🚶‍♂️ <b>Пройдено сейчас:</b> {cur_dist_km} км | ~<b>{cur_steps:,}</b> шагов | ~<b>{cur_kcal}</b> ккал\n\n"
+            f"📊 <b>Всего за сегодня ({today_display}):</b>\n"
             f"• Дистанция: <b>{total_km} км</b>\n"
             f"• Шагов: ~<b>{total_steps:,}</b> / 10 000\n"
             f"• Сожжено: ~<b>{total_kcal} ккал</b>\n\n"
@@ -195,7 +172,6 @@ def setup_handlers(db: Database) -> Router:
 
         await message.answer(response_msg, parse_mode="HTML")
 
-    # --- Остановка трекинга ---
     @router.message(Command("stop"))
     @router.message(F.text.lower().in_(["стоп", "хватит", "конец"]))
     async def cmd_stop(message: Message) -> None:
@@ -234,11 +210,10 @@ def setup_handlers(db: Database) -> Router:
             f"📏 Дистанция: <b>{dist_km} км</b>\n"
             f"👟 Шагов: ~<b>{steps:,}</b>\n"
             f"🔥 Сожжено: ~<b>{kcal} ккал</b>\n\n"
-            f"Результат сохранен в историю за день! 💪"
+            f"Результат сохранен в историю! 💪"
         ).replace(",", " ")
         await message.answer(res_msg, parse_mode="HTML")
 
-    # --- Обработка любых других сообщений ---
     @router.message()
     async def handle_any_message(message: Message) -> None:
         user_id = message.from_user.id
